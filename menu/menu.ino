@@ -34,7 +34,6 @@ void setup(){
 
   lcd_setup();
   encoder_setup();
-
   pinMode(driverPwmPin, OUTPUT);  // heating resistor driver
   pinMode(termistorPin, INPUT);  // termistor input after voltage divider
   pinMode(LED_BUILTIN, OUTPUT);  // status LED output
@@ -53,12 +52,15 @@ void loop() {
 
   // set controller power output 0-255;
   analogWrite(driverPwmPin, pwmPower); 
-
-  delay(1000);
+  rotary_loop();
+  delay(10);
   
 }
 
 void lcdFullscreenUpdate(int pwmPower, int temp) {
+  lcd.setCursor(0, 0);
+  lcd.print("Mode:" + String(second_phase)+ "  ");
+
   lcd.setCursor(0, 1);
   lcd.print("PWM: " + String(pwmPower)+ "   ");
 
@@ -104,14 +106,14 @@ int getCurrentPower() {
 
 // get average value of resistance, 100 probe, 1 per 1mlsecond
 int evaluateResistance(int pickedTermistor) {
-  int resistanceValues[1000];
-  for (int i = 0; i < 1000; i++) {
+  int resistanceValues[50];
+  for (int i = 0; i < 49; i++) {
     resistanceValues[i] = analogRead(pickedTermistor);
     delay(1);
   }
 
   long sum = 0;
-  for (int i = 0; i < 1000; i++) {
+  for (int i = 0; i < 49; i++) {
     sum += resistanceValues[i];
   }
 
@@ -148,17 +150,33 @@ void encoder_setup() {
 
 
 void rotary_loop() {
-  //dont print anything unless value changed
+  // dont print anything unless value changed
   if (rotaryEncoder.encoderChanged()) {
+    Serial.println("trash\n");
       // nothing
   }
-  if (rotaryEncoder.isEncoderButtonClicked()) {
+  // if (rotaryEncoder.isEncoderButtonClicked()) {
+  //   rotary_onButtonClick();
+  // }
+
+  //   rotaryEncoder.readEncoder();  // Read encoder rotation
+
+  if (digitalRead(ROTARY_ENCODER_BUTTON_PIN) == LOW) {
+    Serial.println("Direct GPIO Detect! Button is LOW");
     rotary_onButtonClick();
+    delay(50);
   }
+
+  // if (rotaryEncoder.isEncoderButtonClicked()) {
+  //   Serial.println("Library Button Detect!");
+  //   rotary_onButtonClick();
+  // }
+  
 }
 
 
 void rotary_onButtonClick() {
+  Serial.print("button pressed ");
   second_phase = 1;
 }
 
