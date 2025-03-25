@@ -25,9 +25,7 @@ void rotary_onButtonClick() {
 void rotary_loop() {
   //dont print anything unless value changed
   if (rotaryEncoder.encoderChanged()) {
-    // lcd.clear();
-    // lcd.setCursor(0, 0);
-    // lcd.print(rotaryEncoder.readEncoder());
+      // nothing
   }
   if (rotaryEncoder.isEncoderButtonClicked()) {
     rotary_onButtonClick();
@@ -89,20 +87,11 @@ void setup()
   // LCD SETUP
   Serial.begin(115200);
 
-  //we must initialize rotary encoder
   rotaryEncoder.begin();
   rotaryEncoder.setup(readEncoderISR);
-  //set boundaries and if values should cycle or not
-  //in this example we will set possible values between 0 and 1000;
-  bool circleValues = true;
-  rotaryEncoder.setBoundaries(0, 7, circleValues);  //minValue, maxValue, circleValues true|false (when max go to min and vice versa)
+  rotaryEncoder.setBoundaries(0, 7, true);  //minValue, maxValue,  true|false (when max go to min and vice versa)
 
-  /*Rotary acceleration introduced 25.2.2021.
-   * in case range to select is huge, for example - select a value between 0 and 1000 and we want 785
-   * without accelerateion you need long time to get to that number
-   * Using acceleration, faster you turn, faster will the value raise.
-   * For fine tuning slow down.
-   */
+
   //rotaryEncoder.disableAcceleration(); //acceleration is now enabled by default - disable if you dont need it
   rotaryEncoder.setAcceleration(250);  //or set the value - larger number = more accelearation; 0 or 1 means disabled acceleration
   lcd.init();
@@ -163,8 +152,7 @@ void loop() {
 
   analogWrite(RPWM_Output, pwmPower); // enable for loop
 
-  // just for testing
-  // analogWrite(RPWM_Output, 20);
+
 
 
   delay(1000);
@@ -198,26 +186,12 @@ int getCurrentPower() {
     return LowPower;
   }
 
-
  
 
   return UpKeepPower;
 
 
 }
-
-
-
-
-
-
-
-void startUp_loop() {
-  if (heatModuleIsOn == true) {
-    workMode = 1;  // transition into 1st reachClimaxmode
-  }
-}
-
 
 void reachClimax(int flag) {
   // i need timer here?
@@ -227,22 +201,6 @@ void reachClimax(int flag) {
     climaxFlag, flag == true;
   }
 }
-
-
-void reachingTeamerature_loop() {
-  // set resistor`s PWM to variable (from 0 to 255);
-  if (PMWHeatPowerLevel > 255) {
-    PMWHeatPowerLevel = 255;
-    Serial.println("Max power level is 255!");
-  } else if (PMWHeatPowerLevel < 0) {
-    PMWHeatPowerLevel = 0;
-    Serial.println("Min power level is 0!");
-  } 
-
-  analogWrite(RPWM_Output, PMWHeatPowerLevel);
-}
-
-
 
 
 
@@ -269,8 +227,6 @@ int evaluateResistance(int pickedTermistor) {
 }
 
 
-void coolOff_loop() {
-}
 
 void recvWithEndMarker() {
   static byte ndx = 0;
