@@ -11,6 +11,11 @@
 
 
 // pins on esp32devkit
+String menu_arr[4] = {"mode: ", "PWM: ", "Resistance: ", "time: "};
+int current_menu_index = 0;
+
+
+
 int driverPwmPin = 27;
 int termistorPin = 33;
 
@@ -48,7 +53,8 @@ void loop() {
   int pwmPower = getCurrentPower();
 
   // send pwm + temp
-  lcdFullscreenUpdate(pwmPower, temp);
+  String first_menu_vars[4] = {String(second_phase), String(pwmPower), String(temp), String(millis()/1000)+"s"};
+  lcdFullscreenUpdate(first_menu_vars);
 
   // set controller power output 0-255;
   analogWrite(driverPwmPin, pwmPower); 
@@ -57,19 +63,12 @@ void loop() {
   
 }
 
-void lcdFullscreenUpdate(int pwmPower, int temp) {
-  lcd.setCursor(0, 0);
-  lcd.print("Mode:" + String(second_phase)+ "  ");
+void lcdFullscreenUpdate(String arr[4]) {
 
-  lcd.setCursor(0, 1);
-  lcd.print("PWM: " + String(pwmPower)+ "   ");
-
-  lcd.setCursor(0, 2);
-  lcd.print("Resistance: " + String(temp));
-
-  lcd.setCursor(0, 3);
-  lcd.print("time: " + String(millis()/1000)+"s");
-  return;
+  for (int i=0; i<5;i++){
+    lcd.setCursor(0, i);
+    lcd.print(menu_arr[i] + arr[i]);
+  }
 };
 
 
