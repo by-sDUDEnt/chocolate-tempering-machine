@@ -14,10 +14,11 @@
 String menu_arr[4] = {"mode: ", "PWM: ", "Resistance: ", "time: "};
 String modes[2] = {"manual", "auto"};
 int mode_phase = 0;
-int current_menu_index = 0;
+int menuItemIndex = 0;
 
 
 
+int isMenuItemPicked = false;
 
 
 int driverPwmPin = 27;
@@ -25,16 +26,16 @@ int termistorPin = 33;
 
 // global variables
 
-int autoPwmPower;
+int PWMrate;
 int manualPwmPower;
 // LCD init
 LiquidCrystal_I2C lcd(0x27, 20, 4);
 
 // encoder init
 AiEsp32RotaryEncoder rotaryEncoder = AiEsp32RotaryEncoder(ROTARY_ENCODER_A_PIN, ROTARY_ENCODER_B_PIN, ROTARY_ENCODER_BUTTON_PIN, ROTARY_ENCODER_VCC_PIN, ROTARY_ENCODER_STEPS);
+int temp=0;
 
-
-
+String first_menu_vars[4] = {String(modes[mode_phase])+";", String(PWMrate) + ";", String(temp)+ ";", String(millis()/1000)+"s;"};
 
 
 
@@ -52,23 +53,24 @@ void setup(){
 
 void loop() {
   // probe thermistor 1000th times and gets average temp;
-  int temp = evaluateResistance(termistorPin);
+   temp = evaluateResistance(termistorPin);
 
   // intreal logic based on timings
   
   if (mode_phase == 1){
-     autoPwmPower = getAutoCurrentPower();
+     PWMrate = getAutoCurrentPower();
   }else{
-    autoPwmPower = manualPwmPower;
+    PWMrate = manualPwmPower;
   }
 
 
   // send pwm + temp
-  String first_menu_vars[4] = {String(modes[mode_phase])+";", String(autoPwmPower) + ";", String(temp)+ ";", String(millis()/1000)+"s;"};
+  
   lcdFullscreenUpdate(first_menu_vars);
 
   // set controller power output 0-255;
-  analogWrite(driverPwmPin, autoPwmPower); 
+  analogWrite(driverPwmPin, PWMrate
+); 
   rotary_loop();
   delay(10);
   
@@ -77,14 +79,13 @@ void loop() {
 void lcdFullscreenUpdate(String arr[4]) {
 
   for (int i=0; i<4;i++){
-    
+    lcd.setCursor(0, i);
     // lcd.print(menu_arr[i] + arr[i]);
-    if (i == current_menu_index){
-      lcd.setCursor(0, i);
-      // lcd.print("["+menu_arr[i] + arr[i]+"]"+"   ");
+    if (isMenuItemPicked && i == menuItemIndex){
       lcd.print(print_full_line("["+menu_arr[i] + arr[i]+"]"));
-    } else{
-      lcd.setCursor(0, i);
+    } else if (!isMenuItemPicked && i == menuItemIndex ){
+      lcd.print(print_full_line("-"+menu_arr[i] + arr[i]));
+    } else {
       lcd.print(print_full_line(menu_arr[i] + arr[i]));
     }
 
@@ -176,49 +177,85 @@ void encoder_setup() {
 
 
 void rotary_loop() {
-  // dont print anything unless value changed
   if (rotaryEncoder.encoderChanged()) {
-    Serial.println("trash\n");
-    current_menu_index = rotaryEncoder.readEncoder();
-      // nothing
+    handle_spin();
   }
-  // if (rotaryEncoder.isEncoderButtonClicked()) {
-  //   rotary_onButtonClick();
-  // }
 
-  //   rotaryEncoder.readEncoder();  // Read encoder rotation
 
   if (digitalRead(ROTARY_ENCODER_BUTTON_PIN) == LOW) {
-    Serial.println("Direct GPIO Detect! Button is LOW");
     rotary_onButtonClick();
     delay(50);
   }
 
   // if (rotaryEncoder.isEncoderButtonClicked()) {
-  //   Serial.println("Library Button Detect!");
   //   rotary_onButtonClick();
   // }
   
 }
 
-
-void rotary_onButtonClick() {
-  Serial.print("button pressed ");
-  // second_phase = 1;
-
-  handle_menu_pick();
+void handle_spin(){
+  if(isMenuItemPicked){
+     switch(menuItemIndex){
+      case 0:
+        change_mode();
+        break;
+      case 1:
+        change_pwm();
+        break;
+      case 2:
+        // no function under resistance
+        isMenuItemPicked = false;
+        break;
+      case 3:
+        change_time();
+        break;
+    
+    }
+  }else{
+    menuItemIndex = rotaryEncoder.readEncoder();;
+  }
 }
 
-void handle_menu_pick(){
-  switch (current_menu_index){
-    case 0:
-      mode_phase = !mode_phase;
-      break;
-    case 1:
+
+void change_mode(){
+  mode_phase = !mode_phase;
+}
+
+void change_pwm(){
       manualPwmPower++;
       if (manualPwmPower>=255){
         manualPwmPower=0;
       }
+}
+
+
+void change_time(){
+ // idk rest timer?
+}
+
+
+
+
+
+
+void rotary_onButtonClick() {
+  if (isMenuItemPicked){
+
+  }else{
+    isMenuItemPicked = true;
+
+    // handle_line_pick();
+  }
+}
+
+
+
+void handle_line_pick(){
+  switch (menuItemIndex){
+    case 0:
+      
+    case 1:
+
       break;
     case 2:
 
