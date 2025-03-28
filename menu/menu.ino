@@ -12,7 +12,11 @@
 
 // pins on esp32devkit
 String menu_arr[4] = {"mode: ", "PWM: ", "Resistance: ", "time: "};
+String modes[2] = {"manual", "auto"};
+int mode_phase = 0;
 int current_menu_index = 0;
+
+
 
 
 
@@ -20,8 +24,9 @@ int driverPwmPin = 27;
 int termistorPin = 33;
 
 // global variables
-int second_phase = 0;
 
+int autoPwmPower;
+int manualPwmPower;
 // LCD init
 LiquidCrystal_I2C lcd(0x27, 20, 4);
 
@@ -50,14 +55,20 @@ void loop() {
   int temp = evaluateResistance(termistorPin);
 
   // intreal logic based on timings
-  int pwmPower = getCurrentPower();
+  
+  if (mode_phase == 1){
+     autoPwmPower = getAutoCurrentPower();
+  }else{
+    autoPwmPower = manualPwmPower;
+  }
+
 
   // send pwm + temp
-  String first_menu_vars[4] = {String(second_phase), String(pwmPower), String(temp), String(millis()/1000)+"s"};
+  String first_menu_vars[4] = {String(modes[mode_phase])+";", String(autoPwmPower) + ";", String(temp)+ ";", String(millis()/1000)+"s;"};
   lcdFullscreenUpdate(first_menu_vars);
 
   // set controller power output 0-255;
-  analogWrite(driverPwmPin, pwmPower); 
+  analogWrite(driverPwmPin, autoPwmPower); 
   rotary_loop();
   delay(10);
   
@@ -65,14 +76,30 @@ void loop() {
 
 void lcdFullscreenUpdate(String arr[4]) {
 
-  for (int i=0; i<5;i++){
-    lcd.setCursor(0, i);
-    lcd.print(menu_arr[i] + arr[i]);
+  for (int i=0; i<4;i++){
+    
+    // lcd.print(menu_arr[i] + arr[i]);
+    if (i == current_menu_index){
+      lcd.setCursor(0, i);
+      // lcd.print("["+menu_arr[i] + arr[i]+"]"+"   ");
+      lcd.print(print_full_line("["+menu_arr[i] + arr[i]+"]"));
+    } else{
+      lcd.setCursor(0, i);
+      lcd.print(print_full_line(menu_arr[i] + arr[i]));
+    }
+
   }
 };
 
+String print_full_line(String text){
+  int delta = 19 - text.length();
+  for (int i = 0; i < delta; i++) {
+        text += ' ';
+    };
+  return text;
+}
 
-int getCurrentPower() {
+int getAutoCurrentPower() {
   unsigned long currentTime = millis();
   
   int MaxPower = 255;
@@ -86,9 +113,9 @@ int getCurrentPower() {
   LowPowerTimeEndTime *= 1000;
   MaxPowerEndTime *= 1000;
 
-  if (second_phase == 1){
-    return TemperingPower;
-  }
+  // if (mode_phase == 0){
+  //   return TemperingPower;
+  // }
   
   if (currentTime < MaxPowerEndTime){
     return MaxPower;
@@ -139,10 +166,10 @@ void IRAM_ATTR readEncoderISR() {
 void encoder_setup() {
   rotaryEncoder.begin();
   rotaryEncoder.setup(readEncoderISR);
-  rotaryEncoder.setBoundaries(0, 7, true);  //minValue, maxValue,  true|false (when max go to min and vice versa)
+  rotaryEncoder.setBoundaries(0, 3, true);  //minValue, maxValue,  true|false (when max go to min and vice versa)
 
   //rotaryEncoder.disableAcceleration(); //acceleration is now enabled by default - disable if you dont need it
-  rotaryEncoder.setAcceleration(250);  //or set the value - larger number = more accelearation; 0 or 1 means disabled acceleration
+  rotaryEncoder.setAcceleration(0);  //or set the value - larger number = more accelearation; 0 or 1 means disabled acceleration
   return;
 };
 
@@ -152,6 +179,7 @@ void rotary_loop() {
   // dont print anything unless value changed
   if (rotaryEncoder.encoderChanged()) {
     Serial.println("trash\n");
+    current_menu_index = rotaryEncoder.readEncoder();
       // nothing
   }
   // if (rotaryEncoder.isEncoderButtonClicked()) {
@@ -176,7 +204,29 @@ void rotary_loop() {
 
 void rotary_onButtonClick() {
   Serial.print("button pressed ");
-  second_phase = 1;
+  // second_phase = 1;
+
+  handle_menu_pick();
+}
+
+void handle_menu_pick(){
+  switch (current_menu_index){
+    case 0:
+      mode_phase = !mode_phase;
+      break;
+    case 1:
+      manualPwmPower++;
+      if (manualPwmPower>=255){
+        manualPwmPower=0;
+      }
+      break;
+    case 2:
+
+      break;
+    case 3:
+
+      break;
+  };
 }
 
 
