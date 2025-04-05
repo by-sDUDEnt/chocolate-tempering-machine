@@ -8,34 +8,41 @@
 #define ROTARY_ENCODER_BUTTON_PIN 19
 #define ROTARY_ENCODER_VCC_PIN -1
 #define ROTARY_ENCODER_STEPS 4
+int driverPwmPin = 27;
+int termistorPin = 33;
 
 
 // pins on esp32devkit
-String menu_arr[4] = {"mode: ", "PWM: ", "Resistance: ", "time: "};
+String menu_titles[4] = {"mode: ", "PWM: ", "Resistance: ", "time: "};
 String modes[2] = {"manual", "auto"};
+
+// [mode, pwm]
+String temperator_setings_mode = modes[0];
+int temperator_setings_pwm = 0;
+int temperator_setings_time = 0;
+
 int mode_phase = 0;
 int menuItemIndex = 0;
 
 
-
 int isMenuItemPicked = false;
+int onScreenPWM;
+int selectedManualPWM;
+int temp=0;
+String onScreenTime = String(millis()/1000);
 
-
-int driverPwmPin = 27;
-int termistorPin = 33;
-
+String menu_args[4] = {String(modes[mode_phase]), String(onScreenPWM), String(temp), String(onScreenTime)};
 // global variables
 
-int PWMrate;
-int manualPwmPower;
+
 // LCD init
 LiquidCrystal_I2C lcd(0x27, 20, 4);
 
 // encoder init
 AiEsp32RotaryEncoder rotaryEncoder = AiEsp32RotaryEncoder(ROTARY_ENCODER_A_PIN, ROTARY_ENCODER_B_PIN, ROTARY_ENCODER_BUTTON_PIN, ROTARY_ENCODER_VCC_PIN, ROTARY_ENCODER_STEPS);
-int temp=0;
 
-String first_menu_vars[4] = {String(modes[mode_phase])+";", String(PWMrate) + ";", String(temp)+ ";", String(millis()/1000)+"s;"};
+
+
 
 
 
@@ -57,36 +64,48 @@ void loop() {
 
   // intreal logic based on timings
   
-  if (mode_phase == 1){
-     PWMrate = getAutoCurrentPower();
-  }else{
-    PWMrate = manualPwmPower;
-  }
+ 
 
 
   // send pwm + temp
   
-  lcdFullscreenUpdate(first_menu_vars);
+  lcd4rowUpdate(menu_args);
 
   // set controller power output 0-255;
-  analogWrite(driverPwmPin, PWMrate
-); 
+  handleTemperator();
+
   rotary_loop();
   delay(10);
   
 }
 
-void lcdFullscreenUpdate(String arr[4]) {
+void handleTemperator(){
+
+    if (temperator_setings_mode == "manual"){
+      changeTemperatorPWM(selectedManualPWM);
+    }
+    if (temperator_setings_mode == "auto"){
+      changeTemperatorPWM(getAutoCurrentPower());
+    }
+
+    analogWrite(driverPwmPin, temperator_setings_pwm); 
+}
+
+void changeTemperatorPWM(int pwm){
+  temperator_setings_pwm = pwm;
+}
+
+void lcd4rowUpdate(String arr[4]) {
 
   for (int i=0; i<4;i++){
     lcd.setCursor(0, i);
-    // lcd.print(menu_arr[i] + arr[i]);
+    // lcd.print(menu_titles[i] + arr[i]);
     if (isMenuItemPicked && i == menuItemIndex){
-      lcd.print(print_full_line("["+menu_arr[i] + arr[i]+"]"));
+      lcd.print(print_full_line("["+menu_titles[i] + arr[i]+"]"));
     } else if (!isMenuItemPicked && i == menuItemIndex ){
-      lcd.print(print_full_line("-"+menu_arr[i] + arr[i]));
+      lcd.print(print_full_line("-"+menu_titles[i] + arr[i]));
     } else {
-      lcd.print(print_full_line(menu_arr[i] + arr[i]));
+      lcd.print(print_full_line(menu_titles[i] + arr[i]));
     }
 
   }
@@ -150,14 +169,14 @@ int evaluateResistance(int pickedTermistor) {
   // Print the result
   
   return (int)average;
-}
+};
 
 
 
 void lcd_setup(){
   lcd.init();
   lcd.backlight();
-}
+};
 
 
 void IRAM_ATTR readEncoderISR() {
@@ -222,9 +241,9 @@ void change_mode(){
 }
 
 void change_pwm(){
-      manualPwmPower++;
-      if (manualPwmPower>=255){
-        manualPwmPower=0;
+      onScreenPWM++;
+      if (onScreenPWM>=255){
+        onScreenPWM=0;
       }
 }
 
@@ -240,7 +259,19 @@ void change_time(){
 
 void rotary_onButtonClick() {
   if (isMenuItemPicked){
-
+    switch(menuItemIndex){
+    case 0:
+        temperator_setings_mode = modes[mode_phase];
+        break;
+      case 1:
+        temperator_setings_pwm = onScreenPWM;
+        break;
+      case 2:
+        break;
+      case 3:
+        time = 0;
+        change_time();
+        break;
   }else{
     isMenuItemPicked = true;
 
