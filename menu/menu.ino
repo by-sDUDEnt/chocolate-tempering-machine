@@ -3,181 +3,176 @@
 #include "AiEsp32RotaryEncoder.h"
 #include "Arduino.h"
 
+// Pin Definitions
 #define ROTARY_ENCODER_A_PIN 23
 #define ROTARY_ENCODER_B_PIN 18
 #define ROTARY_ENCODER_BUTTON_PIN 19
 #define ROTARY_ENCODER_VCC_PIN -1
 #define ROTARY_ENCODER_STEPS 4
 
+// ESP32 Pin Assignments
+const int HEATER_PWM_PIN = 27;
+const int THERMISTOR_PIN = 33;
 
-// pins on esp32devkit
-int driverPwmPin = 27;
-int termistorPin = 33;
+// PWM Power Levels
+const int MAX_POWER = 255;
+const int LOW_POWER = 10;
+const int UPKEEP_POWER = 39;
+const int TEMPERING_POWER = 9;
 
-// global variables
-int second_phase = 0;
+// Timing Constants (seconds)
+const int MAX_POWER_DURATION = 130;
+const int LOW_POWER_DURATION = 60;
 
-// LCD init
+// Global Variables
+int temperingPhase = 0;
+
+// Initialize LCD (I2C address, columns, rows)
 LiquidCrystal_I2C lcd(0x27, 20, 4);
 
-// encoder init
-AiEsp32RotaryEncoder rotaryEncoder = AiEsp32RotaryEncoder(ROTARY_ENCODER_A_PIN, ROTARY_ENCODER_B_PIN, ROTARY_ENCODER_BUTTON_PIN, ROTARY_ENCODER_VCC_PIN, ROTARY_ENCODER_STEPS);
+// Initialize Rotary Encoder
+AiEsp32RotaryEncoder rotaryEncoder = AiEsp32RotaryEncoder(
+  ROTARY_ENCODER_A_PIN, 
+  ROTARY_ENCODER_B_PIN, 
+  ROTARY_ENCODER_BUTTON_PIN, 
+  ROTARY_ENCODER_VCC_PIN, 
+  ROTARY_ENCODER_STEPS
+);
 
-
-
-
-
-
-void setup(){
-
-  Serial.begin(115200);
-
-  lcd_setup();
-  encoder_setup();
-  pinMode(driverPwmPin, OUTPUT);  // heating resistor driver
-  pinMode(termistorPin, INPUT);  // termistor input after voltage divider
-  pinMode(LED_BUILTIN, OUTPUT);  // status LED output
+// ISR for Rotary Encoder
+void IRAM_ATTR readEncoderISR() {
+  rotaryEncoder.readEncoder_ISR();
 }
 
+void setup() {
+  Serial.begin(115200);
+  
+  initLCD();
+  initEncoder();
+  
+  pinMode(HEATER_PWM_PIN, OUTPUT);  // Heating resistor driver
+  pinMode(THERMISTOR_PIN, INPUT);   // Thermistor input after voltage divider
+  pinMode(LED_BUILTIN, OUTPUT);     // Status LED output
+}
 
 void loop() {
-  // probe thermistor 1000th times and gets average temp;
-  int temp = evaluateResistance(termistorPin);
-
-  // intreal logic based on timings
-  int pwmPower = getCurrentPower();
-
-  // send pwm + temp
-  lcdFullscreenUpdate(pwmPower, temp);
-
-  // set controller power output 0-255;
-  analogWrite(driverPwmPin, pwmPower); 
-  rotary_loop();
+  // Read temperature from thermistor
+  int temperature = readThermistor(THERMISTOR_PIN);
+  
+  // Calculate appropriate power level based on current phase and timing
+  int pwmPower = calculateHeaterPower();
+  
+  // Update LCD display
+  updateLCD(pwmPower, temperature);
+  
+  // Set heater power
+  analogWrite(HEATER_PWM_PIN, pwmPower);
+  
+  // Handle rotary encoder input
+  handleEncoder();
+  
   delay(10);
-  
 }
 
-void lcdFullscreenUpdate(int pwmPower, int temp) {
-  lcd.setCursor(0, 0);
-  lcd.print("Mode:" + String(second_phase)+ "  ");
-
-  lcd.setCursor(0, 1);
-  lcd.print("PWM: " + String(pwmPower)+ "   ");
-
-  lcd.setCursor(0, 2);
-  lcd.print("Resistance: " + String(temp));
-
-  lcd.setCursor(0, 3);
-  lcd.print("time: " + String(millis()/1000)+"s");
-  return;
-};
-
-
-int getCurrentPower() {
-  unsigned long currentTime = millis();
-  
-  int MaxPower = 255;
-  int LowPower = 10;
-  int UpKeepPower = 39;
-  int TemperingPower = 9;
-
-
-  int MaxPowerEndTime = 130;  // end time for interval from start
-  int LowPowerTimeEndTime = MaxPowerEndTime + 60;  // end of maxpowertime intetval + interval for lowpowertime
-  LowPowerTimeEndTime *= 1000;
-  MaxPowerEndTime *= 1000;
-
-  if (second_phase == 1){
-    return TemperingPower;
-  }
-  
-  if (currentTime < MaxPowerEndTime){
-    return MaxPower;
-  }
-
-  if (currentTime < LowPowerTimeEndTime){
-    return LowPower;
-  }
-
-  return UpKeepPower;
-
-}
-
-
-// get average value of resistance, 100 probe, 1 per 1mlsecond
-int evaluateResistance(int pickedTermistor) {
-  int resistanceValues[50];
-  for (int i = 0; i < 49; i++) {
-    resistanceValues[i] = analogRead(pickedTermistor);
-    delay(1);
-  }
-
-  long sum = 0;
-  for (int i = 0; i < 49; i++) {
-    sum += resistanceValues[i];
-  }
-
-  // Calculate the average
-  float average = (float)sum / 1000;
-
-  // Print the result
-  
-  return (int)average;
-}
-
-
-
-void lcd_setup(){
+// Initialize LCD
+void initLCD() {
   lcd.init();
   lcd.backlight();
 }
 
-
-void IRAM_ATTR readEncoderISR() {
-  rotaryEncoder.readEncoder_ISR();
-};
-
-void encoder_setup() {
+// Initialize Rotary Encoder
+void initEncoder() {
   rotaryEncoder.begin();
   rotaryEncoder.setup(readEncoderISR);
-  rotaryEncoder.setBoundaries(0, 7, true);  //minValue, maxValue,  true|false (when max go to min and vice versa)
-
-  //rotaryEncoder.disableAcceleration(); //acceleration is now enabled by default - disable if you dont need it
-  rotaryEncoder.setAcceleration(250);  //or set the value - larger number = more accelearation; 0 or 1 means disabled acceleration
-  return;
-};
-
-
-
-void rotary_loop() {
-  // dont print anything unless value changed
-  if (rotaryEncoder.encoderChanged()) {
-    Serial.println("trash\n");
-      // nothing
-  }
-  // if (rotaryEncoder.isEncoderButtonClicked()) {
-  //   rotary_onButtonClick();
-  // }
-
-  //   rotaryEncoder.readEncoder();  // Read encoder rotation
-
-  if (digitalRead(ROTARY_ENCODER_BUTTON_PIN) == LOW) {
-    Serial.println("Direct GPIO Detect! Button is LOW");
-    rotary_onButtonClick();
-    delay(50);
-  }
-
-  // if (rotaryEncoder.isEncoderButtonClicked()) {
-  //   Serial.println("Library Button Detect!");
-  //   rotary_onButtonClick();
-  // }
-  
+  rotaryEncoder.setBoundaries(0, 7, true);  // Min, max values, circular (wrap)
+  rotaryEncoder.setAcceleration(250);       // Higher value = more acceleration
 }
 
+// Update all LCD fields
+void updateLCD(int pwmPower, int temperature) {
+  lcd.setCursor(0, 0);
+  lcd.print("Mode:" + String(temperingPhase) + "  ");
 
-void rotary_onButtonClick() {
+  lcd.setCursor(0, 1);
+  lcd.print("PWM: " + String(pwmPower) + "   ");
+
+  lcd.setCursor(0, 2);
+  lcd.print("Resistance: " + String(temperature));
+
+  lcd.setCursor(0, 3);
+  lcd.print("Time: " + String(millis()/1000) + "s");
+}
+
+// Calculate heater power based on current phase and timing
+int calculateHeaterPower() {
+  unsigned long currentTimeMs = millis();
+  unsigned long currentTimeSec = currentTimeMs / 1000;
+  
+  // If in tempering phase (set by button press)
+  if (temperingPhase == 1) {
+    return TEMPERING_POWER;
+  }
+  
+  // Convert timing constants to milliseconds
+  unsigned long maxPowerEndTimeMs = MAX_POWER_DURATION * 1000;
+  unsigned long lowPowerEndTimeMs = maxPowerEndTimeMs + (LOW_POWER_DURATION * 1000);
+  
+  // Initial heating phase
+  if (currentTimeMs < maxPowerEndTimeMs) {
+    return MAX_POWER;
+  }
+  
+  // Cooling phase
+  if (currentTimeMs < lowPowerEndTimeMs) {
+    return LOW_POWER;
+  }
+  
+  // Maintenance phase
+  return UPKEEP_POWER;
+}
+
+// Read and average thermistor values
+int readThermistor(int pin) {
+  const int SAMPLE_COUNT = 50;
+  int readings[SAMPLE_COUNT];
+  
+  // Take multiple readings
+  for (int i = 0; i < SAMPLE_COUNT-1; i++) {
+    readings[i] = analogRead(pin);
+    delay(1);
+  }
+  
+  // Calculate sum of readings
+  long sum = 0;
+  for (int i = 0; i < SAMPLE_COUNT-1; i++) {
+    sum += readings[i];
+  }
+  
+  // Return average (note: the original calculation divided by 1000 instead of SAMPLE_COUNT)
+  // Keeping this as-is to maintain exact functionality
+  return (int)(sum / 1000);
+}
+
+// Handle rotary encoder events
+void handleEncoder() {
+  // Check for encoder value changes
+  if (rotaryEncoder.encoderChanged()) {
+    Serial.println("trash\n");
+    // Original code had this empty functionality, keeping it for exact behavior
+  }
+  
+  // Check for button press using direct GPIO read
+  if (digitalRead(ROTARY_ENCODER_BUTTON_PIN) == LOW) {
+    Serial.println("Direct GPIO Detect! Button is LOW");
+    onEncoderButtonPressed();
+    delay(50);  // Debounce
+  }
+}
+
+// Handle encoder button press
+void onEncoderButtonPressed() {
   Serial.print("button pressed ");
-  second_phase = 1;
+  temperingPhase = 1;
 }
 
 
