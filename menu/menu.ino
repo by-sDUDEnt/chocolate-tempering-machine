@@ -3,298 +3,256 @@
 #include "AiEsp32RotaryEncoder.h"
 #include "Arduino.h"
 
+// Pin definitions
 #define ROTARY_ENCODER_A_PIN 23
 #define ROTARY_ENCODER_B_PIN 18
 #define ROTARY_ENCODER_BUTTON_PIN 19
 #define ROTARY_ENCODER_VCC_PIN -1
 #define ROTARY_ENCODER_STEPS 4
-int driverPwmPin = 27;
-int termistorPin = 33;
 
+// Output pins
+const int driverPwmPin = 27;  // Heating resistor driver
+const int termistorPin = 33;  // Thermistor input after voltage divider
 
-// pins on esp32devkit
-String menu_titles[4] = {"mode: ", "PWM: ", "Resistance: ", "time: "};
-String modes[2] = {"manual", "auto"};
+// Menu system
+const String menu_titles[4] = {"mode: ", "PWM: ", "Resistance: ", "time: "};
+const String modes[2] = {"manual", "auto"};
 
-// [mode, pwm]
-String temperator_setings_mode = modes[0];
+// Device settings
+String temperator_setings_mode = modes[0];  // Default to manual mode
 int temperator_setings_pwm = 0;
 int temperator_setings_time = 0;
 
+// Menu state
 int mode_phase = 0;
 int menuItemIndex = 0;
-
-
-int isMenuItemPicked = false;
-int onScreenPWM;
-int selectedManualPWM;
-int temp=0;
-String onScreenTime = String(millis()/1000);
+bool isMenuItemPicked = false;
+int onScreenPWM = 0;
+int selectedManualPWM = 0;
+int temp = 0;
+String onScreenTime = "0";
 
 String menu_args[4] = {String(modes[mode_phase]), String(onScreenPWM), String(temp), String(onScreenTime)};
-// global variables
 
+// Hardware initialization
+LiquidCrystal_I2C lcd(0x27, 20, 4);  // LCD with I2C address 0x27, 20 columns, 4 rows
+AiEsp32RotaryEncoder rotaryEncoder = AiEsp32RotaryEncoder(
+  ROTARY_ENCODER_A_PIN, 
+  ROTARY_ENCODER_B_PIN, 
+  ROTARY_ENCODER_BUTTON_PIN, 
+  ROTARY_ENCODER_VCC_PIN, 
+  ROTARY_ENCODER_STEPS
+);
 
-// LCD init
-LiquidCrystal_I2C lcd(0x27, 20, 4);
+// Interrupt Service Routine for rotary encoder
+void IRAM_ATTR readEncoderISR() {
+  rotaryEncoder.readEncoder_ISR();
+}
 
-// encoder init
-AiEsp32RotaryEncoder rotaryEncoder = AiEsp32RotaryEncoder(ROTARY_ENCODER_A_PIN, ROTARY_ENCODER_B_PIN, ROTARY_ENCODER_BUTTON_PIN, ROTARY_ENCODER_VCC_PIN, ROTARY_ENCODER_STEPS);
-
-
-
-
-
-
-void setup(){
-
+void setup() {
   Serial.begin(115200);
-
+  
+  // Initialize hardware
   lcd_setup();
   encoder_setup();
-  pinMode(driverPwmPin, OUTPUT);  // heating resistor driver
-  pinMode(termistorPin, INPUT);  // termistor input after voltage divider
-  pinMode(LED_BUILTIN, OUTPUT);  // status LED output
+  
+  // Configure pins
+  pinMode(driverPwmPin, OUTPUT);  // Heating resistor driver
+  pinMode(termistorPin, INPUT);   // Thermistor input
+  pinMode(LED_BUILTIN, OUTPUT);   // Status LED
 }
-
 
 void loop() {
-  // probe thermistor 1000th times and gets average temp;
-   temp = evaluateResistance(termistorPin);
-
-  // intreal logic based on timings
+  // Read temperature by measuring thermistor resistance
+  temp = evaluateResistance(termistorPin);
   
- 
-
-
-  // send pwm + temp
-  
+  // Update LCD display
   lcd4rowUpdate(menu_args);
-
-  // set controller power output 0-255;
-  handleTemperator();
-
-  rotary_loop();
-  delay(10);
   
+  // Control temperature
+  handleTemperator();
+  
+  // Check for user input from rotary encoder
+  rotary_loop();
+  
+  // Short delay to avoid busy-waiting
+  delay(10);
 }
 
-void handleTemperator(){
-
-    if (temperator_setings_mode == "manual"){
-      changeTemperatorPWM(selectedManualPWM);
-    }
-    if (temperator_setings_mode == "auto"){
-      changeTemperatorPWM(getAutoCurrentPower());
-    }
-
-    analogWrite(driverPwmPin, temperator_setings_pwm); 
+// Setup functions
+void lcd_setup() {
+  lcd.init();
+  lcd.backlight();
 }
 
-void changeTemperatorPWM(int pwm){
-  temperator_setings_pwm = pwm;
+void encoder_setup() {
+  rotaryEncoder.begin();
+  rotaryEncoder.setup(readEncoderISR);
+  rotaryEncoder.setBoundaries(0, 3, true);  // minValue, maxValue, cycle (when max goes to min and vice versa)
+  rotaryEncoder.setAcceleration(0);  // 0 means disabled acceleration
 }
 
-void lcd4rowUpdate(String arr[4]) {
-
-  for (int i=0; i<4;i++){
-    lcd.setCursor(0, i);
-    // lcd.print(menu_titles[i] + arr[i]);
-    if (isMenuItemPicked && i == menuItemIndex){
-      lcd.print(print_full_line("["+menu_titles[i] + arr[i]+"]"));
-    } else if (!isMenuItemPicked && i == menuItemIndex ){
-      lcd.print(print_full_line("-"+menu_titles[i] + arr[i]));
-    } else {
-      lcd.print(print_full_line(menu_titles[i] + arr[i]));
-    }
-
+// Temperature control functions
+void handleTemperator() {
+  if (temperator_setings_mode == "manual") {
+    changeTemperatorPWM(onScreenPWM);  // Use the onScreenPWM value in manual mode
+  } else if (temperator_setings_mode == "auto") {
+    changeTemperatorPWM(getAutoCurrentPower());
   }
-};
 
-String print_full_line(String text){
-  int delta = 19 - text.length();
-  for (int i = 0; i < delta; i++) {
-        text += ' ';
-    };
-  return text;
+  // Apply the PWM value to the driver
+  analogWrite(driverPwmPin, temperator_setings_pwm); 
+}
+
+void changeTemperatorPWM(int pwm) {
+  temperator_setings_pwm = pwm;
 }
 
 int getAutoCurrentPower() {
   unsigned long currentTime = millis();
   
-  int MaxPower = 255;
-  int LowPower = 10;
-  int UpKeepPower = 39;
-  int TemperingPower = 9;
-
-
-  int MaxPowerEndTime = 130;  // end time for interval from start
-  int LowPowerTimeEndTime = MaxPowerEndTime + 60;  // end of maxpowertime intetval + interval for lowpowertime
-  LowPowerTimeEndTime *= 1000;
-  MaxPowerEndTime *= 1000;
-
-  // if (mode_phase == 0){
-  //   return TemperingPower;
-  // }
+  // Power levels for different stages
+  const int MaxPower = 255;
+  const int LowPower = 10;
+  const int UpKeepPower = 39;
   
-  if (currentTime < MaxPowerEndTime){
+  // Timing thresholds in milliseconds
+  const unsigned long MaxPowerEndTime = 130 * 1000;  // 130 seconds
+  const unsigned long LowPowerTimeEndTime = MaxPowerEndTime + (60 * 1000);  // 190 seconds
+  
+  if (currentTime < MaxPowerEndTime) {
     return MaxPower;
-  }
-
-  if (currentTime < LowPowerTimeEndTime){
+  } else if (currentTime < LowPowerTimeEndTime) {
     return LowPower;
+  } else {
+    return UpKeepPower;
   }
-
-  return UpKeepPower;
-
 }
 
-
-// get average value of resistance, 100 probe, 1 per 1mlsecond
+// Temperature sensing
 int evaluateResistance(int pickedTermistor) {
   int resistanceValues[50];
+  
+  // Sample thermistor 50 times
   for (int i = 0; i < 49; i++) {
     resistanceValues[i] = analogRead(pickedTermistor);
     delay(1);
   }
 
+  // Calculate average reading
   long sum = 0;
   for (int i = 0; i < 49; i++) {
     sum += resistanceValues[i];
   }
-
-  // Calculate the average
+  
   float average = (float)sum / 1000;
-
-  // Print the result
   
   return (int)average;
-};
+}
 
+// LCD display functions
+void lcd4rowUpdate(String arr[4]) {
+  for (int i = 0; i < 4; i++) {
+    lcd.setCursor(0, i);
+    
+    if (isMenuItemPicked && i == menuItemIndex) {
+      // Selected item with brackets
+      lcd.print(print_full_line("[" + menu_titles[i] + arr[i] + "]"));
+    } else if (!isMenuItemPicked && i == menuItemIndex) {
+      // Highlighted but not selected item
+      lcd.print(print_full_line("-" + menu_titles[i] + arr[i]));
+    } else {
+      // Normal item
+      lcd.print(print_full_line(menu_titles[i] + arr[i]));
+    }
+  }
+}
 
+String print_full_line(String text) {
+  int delta = 19 - text.length();
+  for (int i = 0; i < delta; i++) {
+    text += ' ';
+  }
+  return text;
+}
 
-void lcd_setup(){
-  lcd.init();
-  lcd.backlight();
-};
-
-
-void IRAM_ATTR readEncoderISR() {
-  rotaryEncoder.readEncoder_ISR();
-};
-
-void encoder_setup() {
-  rotaryEncoder.begin();
-  rotaryEncoder.setup(readEncoderISR);
-  rotaryEncoder.setBoundaries(0, 3, true);  //minValue, maxValue,  true|false (when max go to min and vice versa)
-
-  //rotaryEncoder.disableAcceleration(); //acceleration is now enabled by default - disable if you dont need it
-  rotaryEncoder.setAcceleration(0);  //or set the value - larger number = more accelearation; 0 or 1 means disabled acceleration
-  return;
-};
-
-
-
+// Rotary encoder functions
 void rotary_loop() {
+  // Check for encoder rotation
   if (rotaryEncoder.encoderChanged()) {
     handle_spin();
   }
 
-
+  // Check for button press
   if (digitalRead(ROTARY_ENCODER_BUTTON_PIN) == LOW) {
     rotary_onButtonClick();
-    delay(50);
+    delay(50);  // Debounce
   }
-
-  // if (rotaryEncoder.isEncoderButtonClicked()) {
-  //   rotary_onButtonClick();
-  // }
-  
 }
 
-void handle_spin(){
-  if(isMenuItemPicked){
-     switch(menuItemIndex){
-      case 0:
+void handle_spin() {
+  if (isMenuItemPicked) {
+    // Editing a specific menu item
+    switch (menuItemIndex) {
+      case 0:  // Mode
         change_mode();
         break;
-      case 1:
+      case 1:  // PWM
         change_pwm();
         break;
-      case 2:
-        // no function under resistance
+      case 2:  // Resistance (read-only)
         isMenuItemPicked = false;
         break;
-      case 3:
+      case 3:  // Time
         change_time();
         break;
-    
     }
-  }else{
-    menuItemIndex = rotaryEncoder.readEncoder();;
+  } else {
+    // Changing which menu item is selected
+    menuItemIndex = rotaryEncoder.readEncoder();
   }
 }
 
-
-void change_mode(){
+void change_mode() {
   mode_phase = !mode_phase;
+  menu_args[0] = modes[mode_phase];
 }
 
-void change_pwm(){
-      onScreenPWM++;
-      if (onScreenPWM>=255){
-        onScreenPWM=0;
-      }
+void change_pwm() {
+  onScreenPWM++;
+  if (onScreenPWM >= 255) {
+    onScreenPWM = 0;
+  }
+  menu_args[1] = String(onScreenPWM);
 }
 
-
-void change_time(){
- // idk rest timer?
+void change_time() {
+  // Not implemented yet
+  menu_args[3] = String(millis() / 1000);
 }
-
-
-
-
-
 
 void rotary_onButtonClick() {
-  if (isMenuItemPicked){
-    switch(menuItemIndex){
-    case 0:
+  if (isMenuItemPicked) {
+    // Confirm selection
+    switch (menuItemIndex) {
+      case 0:
         temperator_setings_mode = modes[mode_phase];
         break;
       case 1:
         temperator_setings_pwm = onScreenPWM;
         break;
       case 2:
+        // Read-only
         break;
       case 3:
-        time = 0;
-        change_time();
+        // Reset time (not implemented)
         break;
-  }else{
+    }
+    isMenuItemPicked = false;
+  } else {
+    // Enter selection mode
     isMenuItemPicked = true;
-
-    // handle_line_pick();
   }
-}
-
-
-
-void handle_line_pick(){
-  switch (menuItemIndex){
-    case 0:
-      
-    case 1:
-
-      break;
-    case 2:
-
-      break;
-    case 3:
-
-      break;
-  };
 }
 
 
