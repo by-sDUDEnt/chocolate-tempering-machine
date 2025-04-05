@@ -11,28 +11,54 @@
 #define ROTARY_ENCODER_STEPS 4
 
 // Output pins
-const int driverPwmPin = 27;  // Heating resistor driver
-const int termistorPin = 33;  // Thermistor input after voltage divider
+const int DRIVER_PWM_PIN = 27;  // Heating resistor driver
+const int THERMISTOR_PIN = 33;  // Thermistor input after voltage divider
+
+// Thermistor parameters
+#define THERMISTOR_NOMINAL 10000    // 10k ohm at 25°C
+#define TEMPERATURE_NOMINAL 25      // 25°C
+#define BETA_COEFFICIENT 3950       // Beta coefficient of the thermistor
+#define SERIES_RESISTOR 10000       // 10k ohm series resistor
+#define ADC_MAX 4095                // 12-bit ADC max value
+#define NUM_SAMPLES 50              // Number of samples for temperature reading
+
+// Safety parameters
+#define MAX_SAFE_TEMP 50            // Maximum safe temperature in °C
+#define MIN_VALID_TEMP 0            // Minimum valid temperature in °C
+#define MAX_VALID_TEMP 100          // Maximum valid temperature in °C
 
 // Menu system
-const String menu_titles[4] = {"mode: ", "PWM: ", "Resistance: ", "time: "};
-const String modes[2] = {"manual", "auto"};
+const char* MENU_TITLES[4] = {"Mode: ", "PWM: ", "Temp: ", "Time: "};
+const char* MODES[2] = {"manual", "auto"};
 
 // Device settings
-String temperator_setings_mode = modes[0];  // Default to manual mode
-int temperator_setings_pwm = 0;
-int temperator_setings_time = 0;
+uint8_t temperator_mode = 0;       // 0 = manual, 1 = auto
+uint8_t temperator_pwm = 0;        // PWM value (0-255)
+unsigned long start_time = 0;       // Start time for auto mode
+bool heating_enabled = true;        // Safety flag to disable heating
 
 // Menu state
-int mode_phase = 0;
-int menuItemIndex = 0;
+uint8_t menuItemIndex = 0;
 bool isMenuItemPicked = false;
-int onScreenPWM = 0;
-int selectedManualPWM = 0;
-int temp = 0;
-String onScreenTime = "0";
+uint8_t onScreenPWM = 0;
+float current_temp = 0.0;
+unsigned long elapsed_time = 0;
+char time_buffer[10];              // Buffer for time display
 
-String menu_args[4] = {String(modes[mode_phase]), String(onScreenPWM), String(temp), String(onScreenTime)};
+// Auto mode parameters
+typedef struct {
+    float target_temp;
+    uint8_t pwm_value;
+    unsigned long duration;
+} TempPhase;
+
+// Define tempering phases
+const TempPhase TEMP_PHASES[] = {
+    {45.0, 255, 130000},  // Phase 1: Heat to 45°C
+    {27.0, 10,  60000},   // Phase 2: Cool to 27°C
+    {31.5, 39,  0}        // Phase 3: Maintain at 31.5°C
+};
+uint8_t current_phase = 0;
 
 // Hardware initialization
 LiquidCrystal_I2C lcd(0x27, 20, 4);  // LCD with I2C address 0x27, 20 columns, 4 rows
@@ -43,6 +69,23 @@ AiEsp32RotaryEncoder rotaryEncoder = AiEsp32RotaryEncoder(
   ROTARY_ENCODER_VCC_PIN, 
   ROTARY_ENCODER_STEPS
 );
+
+// Function prototypes
+void lcd_setup();
+void encoder_setup();
+float readTemperature();
+void handleTemperator();
+void changeTemperatorPWM(uint8_t pwm);
+uint8_t getAutoCurrentPower();
+void lcd4rowUpdate();
+String padString(const String& text);
+void rotary_loop();
+void handle_spin();
+void change_mode();
+void change_pwm();
+void change_time();
+void rotary_onButtonClick();
+bool checkSafety();
 
 // Interrupt Service Routine for rotary encoder
 void IRAM_ATTR readEncoderISR() {
@@ -57,17 +100,25 @@ void setup() {
   encoder_setup();
   
   // Configure pins
-  pinMode(driverPwmPin, OUTPUT);  // Heating resistor driver
-  pinMode(termistorPin, INPUT);   // Thermistor input
-  pinMode(LED_BUILTIN, OUTPUT);   // Status LED
+  pinMode(DRIVER_PWM_PIN, OUTPUT);  // Heating resistor driver
+  pinMode(THERMISTOR_PIN, INPUT);   // Thermistor input
+  pinMode(LED_BUILTIN, OUTPUT);     // Status LED
+  
+  // Initialize system
+  start_time = millis();
+  analogWrite(DRIVER_PWM_PIN, 0);   // Start with heating off
 }
 
 void loop() {
-  // Read temperature by measuring thermistor resistance
-  temp = evaluateResistance(termistorPin);
+  // Read temperature and update timing
+  current_temp = readTemperature();
+  elapsed_time = millis() - start_time;
+  
+  // Check system safety
+  heating_enabled = checkSafety();
   
   // Update LCD display
-  lcd4rowUpdate(menu_args);
+  lcd4rowUpdate();
   
   // Control temperature
   handleTemperator();
@@ -92,88 +143,144 @@ void encoder_setup() {
   rotaryEncoder.setAcceleration(0);  // 0 means disabled acceleration
 }
 
+// Safety check function
+bool checkSafety() {
+  // Check for sensor errors (unreasonable values)
+  if (current_temp < MIN_VALID_TEMP || current_temp > MAX_VALID_TEMP) {
+    digitalWrite(LED_BUILTIN, HIGH); // Turn on warning LED
+    return false;
+  }
+  
+  // Check for overheating
+  if (current_temp > MAX_SAFE_TEMP) {
+    digitalWrite(LED_BUILTIN, HIGH); // Turn on warning LED
+    return false;
+  }
+  
+  digitalWrite(LED_BUILTIN, LOW); // Turn off warning LED
+  return true;
+}
+
 // Temperature control functions
 void handleTemperator() {
-  if (temperator_setings_mode == "manual") {
+  if (MODES[temperator_mode] == "manual") {
     changeTemperatorPWM(onScreenPWM);  // Use the onScreenPWM value in manual mode
-  } else if (temperator_setings_mode == "auto") {
+  } else if (MODES[temperator_mode] == "auto") {
     changeTemperatorPWM(getAutoCurrentPower());
   }
 
-  // Apply the PWM value to the driver
-  analogWrite(driverPwmPin, temperator_setings_pwm); 
-}
-
-void changeTemperatorPWM(int pwm) {
-  temperator_setings_pwm = pwm;
-}
-
-int getAutoCurrentPower() {
-  unsigned long currentTime = millis();
-  
-  // Power levels for different stages
-  const int MaxPower = 255;
-  const int LowPower = 10;
-  const int UpKeepPower = 39;
-  
-  // Timing thresholds in milliseconds
-  const unsigned long MaxPowerEndTime = 130 * 1000;  // 130 seconds
-  const unsigned long LowPowerTimeEndTime = MaxPowerEndTime + (60 * 1000);  // 190 seconds
-  
-  if (currentTime < MaxPowerEndTime) {
-    return MaxPower;
-  } else if (currentTime < LowPowerTimeEndTime) {
-    return LowPower;
+  // Apply the PWM value to the driver (with safety check)
+  if (heating_enabled) {
+    analogWrite(DRIVER_PWM_PIN, temperator_pwm);
   } else {
-    return UpKeepPower;
+    analogWrite(DRIVER_PWM_PIN, 0);  // Safety cut-off
   }
 }
 
-// Temperature sensing
-int evaluateResistance(int pickedTermistor) {
-  int resistanceValues[50];
+void changeTemperatorPWM(uint8_t pwm) {
+  temperator_pwm = pwm;
+}
+
+uint8_t getAutoCurrentPower() {
+  // Determine current phase based on elapsed time
+  if (current_phase == 0 && elapsed_time >= TEMP_PHASES[0].duration) {
+    current_phase = 1;
+  } else if (current_phase == 1 && elapsed_time >= (TEMP_PHASES[0].duration + TEMP_PHASES[1].duration)) {
+    current_phase = 2;
+  }
   
-  // Sample thermistor 50 times
-  for (int i = 0; i < 49; i++) {
-    resistanceValues[i] = analogRead(pickedTermistor);
+  TempPhase phase = TEMP_PHASES[current_phase];
+  
+  // Temperature-based control with PID-like approach
+  float error = phase.target_temp - current_temp;
+  
+  // Simple proportional control with limits
+  int adjustment = (int)(error * 10); // 10 = proportional gain
+  int power = phase.pwm_value + adjustment;
+  
+  // Constrain the output
+  if (power < 0) power = 0;
+  if (power > 255) power = 255;
+  
+  return (uint8_t)power;
+}
+
+// Temperature measurement with proper conversion
+float readTemperature() {
+  uint16_t samples[NUM_SAMPLES];
+  
+  // Sample thermistor multiple times
+  for (int i = 0; i < NUM_SAMPLES; i++) {
+    samples[i] = analogRead(THERMISTOR_PIN);
     delay(1);
   }
 
   // Calculate average reading
-  long sum = 0;
-  for (int i = 0; i < 49; i++) {
-    sum += resistanceValues[i];
+  uint32_t sum = 0;
+  for (int i = 0; i < NUM_SAMPLES; i++) {
+    sum += samples[i];
   }
   
-  float average = (float)sum / 1000;
+  float average = (float)sum / NUM_SAMPLES;
   
-  return (int)average;
+  // Convert to resistance
+  float resistance = SERIES_RESISTOR / ((ADC_MAX / average) - 1.0);
+  
+  // Apply Steinhart-Hart equation (simplified B parameter equation)
+  float steinhart = resistance / THERMISTOR_NOMINAL;      // (R/Ro)
+  steinhart = log(steinhart);                             // ln(R/Ro)
+  steinhart /= BETA_COEFFICIENT;                          // 1/B * ln(R/Ro)
+  steinhart += 1.0 / (TEMPERATURE_NOMINAL + 273.15);      // + (1/To)
+  steinhart = 1.0 / steinhart;                            // Invert
+  steinhart -= 273.15;                                    // Convert to Celsius
+  
+  return steinhart;
 }
 
 // LCD display functions
-void lcd4rowUpdate(String arr[4]) {
+void lcd4rowUpdate() {
+  // Format time as MM:SS
+  unsigned long seconds = elapsed_time / 1000;
+  int minutes = seconds / 60;
+  int remainingSeconds = seconds % 60;
+  sprintf(time_buffer, "%02d:%02d", minutes, remainingSeconds);
+  
+  // Format temperature with 1 decimal place
+  char temp_buffer[8];
+  dtostrf(current_temp, 4, 1, temp_buffer);
+  
+  // Build menu items
+  String menu_items[4] = {
+    String(MODES[temperator_mode]),
+    String(onScreenPWM),
+    String(temp_buffer) + "C",
+    String(time_buffer)
+  };
+  
+  // Update LCD
   for (int i = 0; i < 4; i++) {
     lcd.setCursor(0, i);
     
     if (isMenuItemPicked && i == menuItemIndex) {
       // Selected item with brackets
-      lcd.print(print_full_line("[" + menu_titles[i] + arr[i] + "]"));
+      lcd.print(padString("[" + String(MENU_TITLES[i]) + menu_items[i] + "]"));
     } else if (!isMenuItemPicked && i == menuItemIndex) {
       // Highlighted but not selected item
-      lcd.print(print_full_line("-" + menu_titles[i] + arr[i]));
+      lcd.print(padString("-" + String(MENU_TITLES[i]) + menu_items[i]));
     } else {
       // Normal item
-      lcd.print(print_full_line(menu_titles[i] + arr[i]));
+      lcd.print(padString(String(MENU_TITLES[i]) + menu_items[i]));
     }
   }
 }
 
-String print_full_line(String text) {
+String padString(const String& text) {
   int delta = 19 - text.length();
+  String padded = text;
   for (int i = 0; i < delta; i++) {
-    text += ' ';
+    padded += ' ';
   }
-  return text;
+  return padded;
 }
 
 // Rotary encoder functions
@@ -183,10 +290,14 @@ void rotary_loop() {
     handle_spin();
   }
 
-  // Check for button press
+  // Check for button press with debounce
+  static unsigned long lastButtonPress = 0;
   if (digitalRead(ROTARY_ENCODER_BUTTON_PIN) == LOW) {
-    rotary_onButtonClick();
-    delay(50);  // Debounce
+    unsigned long now = millis();
+    if (now - lastButtonPress > 200) {  // 200ms debounce
+      rotary_onButtonClick();
+      lastButtonPress = now;
+    }
   }
 }
 
@@ -200,7 +311,7 @@ void handle_spin() {
       case 1:  // PWM
         change_pwm();
         break;
-      case 2:  // Resistance (read-only)
+      case 2:  // Temperature (read-only)
         isMenuItemPicked = false;
         break;
       case 3:  // Time
@@ -214,21 +325,36 @@ void handle_spin() {
 }
 
 void change_mode() {
-  mode_phase = !mode_phase;
-  menu_args[0] = modes[mode_phase];
+  temperator_mode = !temperator_mode;
+  
+  // Reset timers when switching to auto mode
+  if (temperator_mode == 1) {
+    start_time = millis();
+    current_phase = 0;
+  }
 }
 
 void change_pwm() {
-  onScreenPWM++;
-  if (onScreenPWM >= 255) {
-    onScreenPWM = 0;
+  // Allow larger increments for faster adjustments
+  int encoder_value = rotaryEncoder.readEncoder();
+  static int last_encoder_value = 0;
+  
+  int step = 5; // Default step size
+  
+  // Determine direction and adjust PWM
+  if (encoder_value > last_encoder_value) {
+    onScreenPWM = min(255, onScreenPWM + step);
+  } else if (encoder_value < last_encoder_value) {
+    onScreenPWM = max(0, onScreenPWM - step);
   }
-  menu_args[1] = String(onScreenPWM);
+  
+  last_encoder_value = encoder_value;
 }
 
 void change_time() {
-  // Not implemented yet
-  menu_args[3] = String(millis() / 1000);
+  // Reset timer functionality
+  start_time = millis();
+  current_phase = 0;
 }
 
 void rotary_onButtonClick() {
@@ -236,16 +362,23 @@ void rotary_onButtonClick() {
     // Confirm selection
     switch (menuItemIndex) {
       case 0:
-        temperator_setings_mode = modes[mode_phase];
+        // Mode already changed in change_mode()
+        if (temperator_mode == 1) {
+          start_time = millis(); // Reset timer when switching to auto
+          current_phase = 0;
+        }
         break;
       case 1:
-        temperator_setings_pwm = onScreenPWM;
+        // Apply the PWM setting
+        if (temperator_mode == 0) { // Only in manual mode
+          temperator_pwm = onScreenPWM;
+        }
         break;
       case 2:
         // Read-only
         break;
       case 3:
-        // Reset time (not implemented)
+        // Reset time already done in change_time()
         break;
     }
     isMenuItemPicked = false;
