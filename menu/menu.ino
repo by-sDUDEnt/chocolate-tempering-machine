@@ -24,6 +24,7 @@ int temperator_setings_time = 0;
 int mode_phase = 0;
 int menuItemIndex = 0;
 
+int inLineMenuIndex = 0;
 
 int isMenuItemPicked = false;
 int onScreenPWM;
@@ -37,13 +38,8 @@ String menu_args[4] = {String(modes[mode_phase]), String(onScreenPWM), String(te
 
 // LCD init
 LiquidCrystal_I2C lcd(0x27, 20, 4);
-
 // encoder init
 AiEsp32RotaryEncoder rotaryEncoder = AiEsp32RotaryEncoder(ROTARY_ENCODER_A_PIN, ROTARY_ENCODER_B_PIN, ROTARY_ENCODER_BUTTON_PIN, ROTARY_ENCODER_VCC_PIN, ROTARY_ENCODER_STEPS);
-
-
-
-
 
 
 void setup(){
@@ -73,7 +69,7 @@ void loop() {
 
   // set controller power output 0-255;
   handleTemperator();
-
+  // onScreenTime = String(millis()/1000);
   rotary_loop();
   delay(10);
   
@@ -87,12 +83,13 @@ void handleTemperator(){
     if (temperator_setings_mode == "auto"){
       changeTemperatorPWM(getAutoCurrentPower());
     }
-
+    
     analogWrite(driverPwmPin, temperator_setings_pwm); 
 }
 
 void changeTemperatorPWM(int pwm){
   temperator_setings_pwm = pwm;
+  menu_args[1] = String(pwm);
 }
 
 void lcd4rowUpdate(String arr[4]) {
@@ -120,7 +117,7 @@ String print_full_line(String text){
 }
 
 int getAutoCurrentPower() {
-  unsigned long currentTime = millis();
+  unsigned long currentTime = onScreenTime.toInt();
   
   int MaxPower = 255;
   int LowPower = 10;
@@ -214,8 +211,10 @@ void rotary_loop() {
 
 void handle_spin(){
   if(isMenuItemPicked){
+     inLineMenuIndex =  rotaryEncoder.readEncoder();
      switch(menuItemIndex){
       case 0:
+        Serial.println("case 0 in swithc");
         change_mode();
         break;
       case 1:
@@ -226,18 +225,26 @@ void handle_spin(){
         isMenuItemPicked = false;
         break;
       case 3:
-        change_time();
+        // change_time();
         break;
     
     }
   }else{
-    menuItemIndex = rotaryEncoder.readEncoder();;
+    menuItemIndex = rotaryEncoder.readEncoder();
   }
 }
 
 
 void change_mode(){
-  mode_phase = !mode_phase;
+  // mode_phase = !mode_phase;
+  if (menu_args[0] == String(modes[0])){
+    menu_args[0] = String(modes[1]);
+  } else{
+    menu_args[0] = String(modes[0]);
+  }
+  // menu_args[0] = String(modes[mode_phase])
+  Serial.println("changed modes");
+  Serial.println(menu_args[0]);
 }
 
 void change_pwm(){
@@ -249,6 +256,7 @@ void change_pwm(){
 
 
 void change_time(){
+  onScreenTime = "0";
  // idk rest timer?
 }
 
@@ -261,7 +269,8 @@ void rotary_onButtonClick() {
   if (isMenuItemPicked){
     switch(menuItemIndex){
     case 0:
-        temperator_setings_mode = modes[mode_phase];
+        temperator_setings_mode = menu_args[0];
+        isMenuItemPicked = false;
         break;
       case 1:
         temperator_setings_pwm = onScreenPWM;
@@ -269,9 +278,10 @@ void rotary_onButtonClick() {
       case 2:
         break;
       case 3:
-        time = 0;
+        // onScreenTime = "0";
         change_time();
-        break;
+         isMenuItemPicked = false;
+        break;}
   }else{
     isMenuItemPicked = true;
 
