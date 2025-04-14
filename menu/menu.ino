@@ -27,11 +27,11 @@ int menuItemIndex = 0;
 int inLineMenuIndex = 0;
 
 int isMenuItemPicked = false;
-int onScreenPWM;
-int selectedManualPWM;
+int onScreenPWM = 0;
+int selectedManualPWM = 0;
 int temp = 0;
 unsigned long startTime = 0;
-String onScreenTime = String(millis() / 1000);
+String onScreenTime = "0";
 
 String menu_args[4] = { String(modes[mode_phase]), String(onScreenPWM), String(temp), onScreenTime };
 // global variables
@@ -50,11 +50,17 @@ void setup() {
   pinMode(driverPwmPin, OUTPUT);  // heating resistor driver
   pinMode(termistorPin, INPUT);   // termistor input after voltage divider
   pinMode(LED_BUILTIN, OUTPUT);   // status LED output
+  
+  // Initialize values
+  startTime = millis();
+  onScreenTime = "0";
+  menu_args[3] = onScreenTime;
 }
 
 void loop() {
   // probe thermistor 1000th times and gets average temp;
   temp = evaluateResistance(termistorPin);
+  menu_args[2] = String(temp);  // Update resistance display
 
   // intreal logic based on timings
 
@@ -62,7 +68,12 @@ void loop() {
 
   // set controller power output 0-255;
   handleTemperator();
-  menu_args[3] = String(millis() / 1000);
+
+  
+  // Update time display
+  onScreenTime = String(millis() / 1000);
+  menu_args[3] = onScreenTime;  // Update the time in menu_args
+
   Serial.println(onScreenTime);
   rotary_loop();
   delay(10);
@@ -121,9 +132,12 @@ int getAutoCurrentPower() {
 
   int MaxPowerEndTime = 130;  // end time for interval from start
   // int MaxPowerEndTime = 10;                        // end time for interval from start
+
   int LowPowerTimeEndTime = MaxPowerEndTime + 60;  // end of maxpowertime intetval + interval for lowpowertime
-  LowPowerTimeEndTime *= 1000;
-  MaxPowerEndTime *= 1000;
+  
+  // Don't multiply by 1000 - currentTime is already in seconds
+  // LowPowerTimeEndTime *= 1000;
+  // MaxPowerEndTime *= 1000;
 
   // if (mode_phase == 0){
   //   return TemperingPower;
@@ -244,6 +258,7 @@ void change_pwm() {
   if (onScreenPWM >= 255) {
     onScreenPWM = 0;
   }
+  menu_args[1] = String(onScreenPWM);  // Update PWM display immediately
 }
 
 
@@ -265,9 +280,12 @@ void rotary_onButtonClick() {
         isMenuItemPicked = false;
         break;
       case 1:
-        temperator_setings_pwm = onScreenPWM;
+        selectedManualPWM = onScreenPWM;
+        temperator_setings_pwm = selectedManualPWM;
+        isMenuItemPicked = false;
         break;
       case 2:
+        isMenuItemPicked = false;
         break;
       case 3:
         // onScreenTime = "0";
