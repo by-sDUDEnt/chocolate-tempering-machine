@@ -42,9 +42,7 @@ LiquidCrystal_I2C lcd(0x27, 20, 4);
 // encoder init
 AiEsp32RotaryEncoder rotaryEncoder = AiEsp32RotaryEncoder(ROTARY_ENCODER_A_PIN, ROTARY_ENCODER_B_PIN, ROTARY_ENCODER_BUTTON_PIN, ROTARY_ENCODER_VCC_PIN, ROTARY_ENCODER_STEPS);
 
-
 void setup() {
-
   Serial.begin(115200);
 
   lcd_setup();
@@ -54,50 +52,39 @@ void setup() {
   pinMode(LED_BUILTIN, OUTPUT);   // status LED output
 }
 
-
 void loop() {
   // probe thermistor 1000th times and gets average temp;
   temp = evaluateResistance(termistorPin);
 
   // intreal logic based on timings
 
-
-
-
-
-
-
-
-
-
-
-  // send pwm + temp
-
   lcd4rowUpdate(menu_args);
 
   // set controller power output 0-255;
   handleTemperator();
-  onScreenTime = String(millis() / 1000);
+  menu_args[3] = String(millis() / 1000);
   Serial.println(onScreenTime);
   rotary_loop();
   delay(10);
 }
 
 void handleTemperator() {
-
   if (temperator_setings_mode == "manual") {
-    changeTemperatorPWM(selectedManualPWM);
+    // changeTemperatorPWM(selectedManualPWM);
   }
+
   if (temperator_setings_mode == "auto") {
     changeTemperatorPWM(getAutoCurrentPower());
+    // menu_args[1] = getAutoCurrentPower();
   }
-
+  
   analogWrite(driverPwmPin, temperator_setings_pwm);
 }
 
 void changeTemperatorPWM(int pwm) {
   temperator_setings_pwm = pwm;
   menu_args[1] = String(pwm);
+  Serial.println("t:" + menu_args[1]);
 }
 
 void lcd4rowUpdate(String arr[4]) {
@@ -124,7 +111,7 @@ String print_full_line(String text) {
 }
 
 int getAutoCurrentPower() {
-  unsigned long currentTime = millis() / 1000;
+  unsigned long currentTime = millis();
   Serial.println("s:" + String(currentTime));
   int MaxPower = 255;
   int LowPower = 10;
@@ -132,8 +119,8 @@ int getAutoCurrentPower() {
   int TemperingPower = 9;
 
 
-  // int MaxPowerEndTime = 130;  // end time for interval from start
-  int MaxPowerEndTime = 10;                        // end time for interval from start
+  int MaxPowerEndTime = 130;  // end time for interval from start
+  // int MaxPowerEndTime = 10;                        // end time for interval from start
   int LowPowerTimeEndTime = MaxPowerEndTime + 60;  // end of maxpowertime intetval + interval for lowpowertime
   LowPowerTimeEndTime *= 1000;
   MaxPowerEndTime *= 1000;
