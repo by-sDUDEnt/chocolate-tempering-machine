@@ -30,9 +30,10 @@ int isMenuItemPicked = false;
 int onScreenPWM;
 int selectedManualPWM;
 int temp=0;
+unsigned long startTime = 0;
 String onScreenTime = String(millis()/1000);
 
-String menu_args[4] = {String(modes[mode_phase]), String(onScreenPWM), String(temp), String(onScreenTime)};
+String menu_args[4] = {String(modes[mode_phase]), String(onScreenPWM), String(temp), onScreenTime};
 // global variables
 
 
@@ -69,7 +70,8 @@ void loop() {
 
   // set controller power output 0-255;
   handleTemperator();
-  // onScreenTime = String(millis()/1000);
+  onScreenTime = String(millis()/1000);
+  Serial.println(onScreenTime);
   rotary_loop();
   delay(10);
   
@@ -117,15 +119,16 @@ String print_full_line(String text){
 }
 
 int getAutoCurrentPower() {
-  unsigned long currentTime = onScreenTime.toInt();
-  
+  unsigned long currentTime = millis()/1000;
+  Serial.println("s:" + String(currentTime));
   int MaxPower = 255;
   int LowPower = 10;
   int UpKeepPower = 39;
   int TemperingPower = 9;
 
 
-  int MaxPowerEndTime = 130;  // end time for interval from start
+  // int MaxPowerEndTime = 130;  // end time for interval from start
+    int MaxPowerEndTime = 10;  // end time for interval from start
   int LowPowerTimeEndTime = MaxPowerEndTime + 60;  // end of maxpowertime intetval + interval for lowpowertime
   LowPowerTimeEndTime *= 1000;
   MaxPowerEndTime *= 1000;
@@ -256,7 +259,7 @@ void change_pwm(){
 
 
 void change_time(){
-  onScreenTime = "0";
+  // startTime = 0;
  // idk rest timer?
 }
 
